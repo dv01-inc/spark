@@ -30,7 +30,6 @@ import scala.language.postfixOps
 import scala.reflect.ClassTag
 
 import org.json4s._
-import org.mockito.Mockito._
 import org.json4s.jackson.JsonMethods._
 import org.mockito.Mockito.{mock, when}
 import org.scalatest.{BeforeAndAfter, Matchers, PrivateMethodTester}
@@ -40,7 +39,7 @@ import other.supplier.{CustomPersistenceEngine, CustomRecoveryModeFactory}
 import org.apache.spark.{SecurityManager, SparkConf, SparkFunSuite}
 import org.apache.spark.deploy._
 import org.apache.spark.deploy.DeployMessages._
-import org.apache.spark.rpc._
+import org.apache.spark.rpc.{RpcAddress, RpcEndpoint, RpcEndpointRef, RpcEnv}
 import org.apache.spark.serializer
 
 object MockWorker {
@@ -309,74 +308,6 @@ class MasterSuite extends SparkFunSuite
       localCluster.stop()
     }
   }
-
-  test("dense scheduling") {
-    denseScheduling(dense = true)
-  }
-  test("no dense scheduling") {
-    denseScheduling(dense = false)
-  }
-
-  private def denseScheduling(dense: Boolean) = {
-    // config
-    val noSpreadConf = new SparkConf().set("spark.deploy.spreadOut", "false")
-    val conf = if (dense) {
-      noSpreadConf.set("spark.deploy.dense", "true")
-    } else {
-      noSpreadConf
-    }
-    val master = makeMaster(conf)
-
-    // initialize endpoint
-    master.rpcEnv.setupEndpoint(Master.ENDPOINT_NAME, master)
-    eventually(timeout(10.seconds)) {
-      val masterState = master.self.askWithRetry[MasterStateResponse](RequestMasterState)
-      assert(masterState.status === RecoveryState.ALIVE, "Master is not alive")
-    }
-
-    val rpcEndpointMock = mock(classOf[RpcEndpointRef])
-
-    // set up workers
-    val worker = RegisterWorker(
-      id = "1",
-      host = "localhost",
-      port = 1,
-      worker = rpcEndpointMock,
-      cores = 10,
-      memory = 4096,
-      workerWebUiUrl = ""
-    )
-
-    val senderAddress = RpcAddress("localhost", 12345)
-
-    val rpcCallContext = mock(classOf[RpcCallContext])
-    when(rpcCallContext.senderAddress).thenReturn(senderAddress)
-
-    when(rpcEndpointMock.address).thenReturn(RpcAddress("localhost", 1))
-    master.receiveAndReply(rpcCallContext)(worker)
-
-    when(rpcEndpointMock.address).thenReturn(RpcAddress("localhost", 2))
-    master.receiveAndReply(rpcCallContext)(worker.copy(id = "2"))
-
-    assert(master.workers.size === 2)
-
-    // set up apps
-    val app1 = ApplicationDescription("app1", Some(4), 1024, mock(classOf[Command]), "")
-    val app2 = ApplicationDescription("app2", Some(6), 1024, mock(classOf[Command]), "")
-
-    when(rpcEndpointMock.address).thenReturn(RpcAddress("localhost", 1))
-    master.receive(RegisterApplication(app1, rpcEndpointMock))
-    when(rpcEndpointMock.address).thenReturn(RpcAddress("localhost", 2))
-    master.receive(RegisterApplication(app2, rpcEndpointMock))
-
-    // check executor core allocation
-    if (dense) {
-      assert(master.workers.map(_.coresUsed).toSet === Set(10, 0))
-    } else {
-      assert(master.workers.map(_.coresUsed).toSet === Set(4, 6))
-    }
-  }
-
 
   test("basic scheduling - spread out") {
     basicScheduling(spreadOut = true)
