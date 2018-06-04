@@ -113,6 +113,9 @@ private[deploy] class Master(
   // among all the nodes) instead of trying to consolidate each app onto a small # of nodes.
   private val spreadOutApps = conf.getBoolean("spark.deploy.spreadOut", true)
 
+  // Custom dv01 specific scheduling to maximize density on used nodes
+  private val denseScheduling = conf.getBoolean("spark.deploy.dense", false)
+
   // Default maxCores for applications that don't specify it (i.e. pass Int.MaxValue)
   private val defaultCores = conf.getInt("spark.deploy.defaultCores", Int.MaxValue)
   val reverseProxy = conf.getBoolean("spark.ui.reverseProxy", false)
@@ -671,10 +674,13 @@ private[deploy] class Master(
       // If the cores left is less than the coresPerExecutor,the cores left will not be allocated
       if (app.coresLeft >= coresPerExecutor) {
         // Filter out workers that don't have enough resources to launch an executor
-        val usableWorkers = workers.toArray.filter(_.state == WorkerState.ALIVE)
+        val usableWorkersSorted = workers.toArray.filter(_.state == WorkerState.ALIVE)
           .filter(worker => worker.memoryFree >= app.desc.memoryPerExecutorMB &&
             worker.coresFree >= coresPerExecutor)
-          .sortBy(_.coresFree).reverse
+          .sortBy(_.coresFree)
+
+        val usableWorkers = if (denseScheduling) usableWorkersSorted else usableWorkersSorted.reverse
+
         val assignedCores = scheduleExecutorsOnWorkers(app, usableWorkers, spreadOutApps)
 
         // Now that we've decided how many cores to allocate on each worker, let's allocate them
@@ -719,8 +725,14 @@ private[deploy] class Master(
       return
     }
     // Drivers take strict precedence over executors
-    val shuffledAliveWorkers = Random.shuffle(workers.toSeq.filter(_.state == WorkerState.ALIVE))
-    val numWorkersAlive = shuffledAliveWorkers.size
+    val aliveWorkers = if (denseScheduling) {
+      startExecutorsOnWorkers()
+      workers.toSeq.filter(_.state == WorkerState.ALIVE).sortBy(_.coresFree)
+    } else {
+      Random.shuffle(workers.toSeq.filter(_.state == WorkerState.ALIVE))
+    }
+    val numWorkersAlive = aliveWorkers.size
+
     var curPos = 0
     for (driver <- waitingDrivers.toList) { // iterate over a copy of waitingDrivers
       // We assign workers to each waiting driver in a round-robin fashion. For each driver, we
@@ -729,7 +741,7 @@ private[deploy] class Master(
       var launched = false
       var numWorkersVisited = 0
       while (numWorkersVisited < numWorkersAlive && !launched) {
-        val worker = shuffledAliveWorkers(curPos)
+        val worker = aliveWorkers(curPos)
         numWorkersVisited += 1
         if (worker.memoryFree >= driver.desc.mem && worker.coresFree >= driver.desc.cores) {
           launchDriver(worker, driver)
