@@ -145,6 +145,9 @@ class JDBCOptions(
       case "REPEATABLE_READ" => Connection.TRANSACTION_REPEATABLE_READ
       case "SERIALIZABLE" => Connection.TRANSACTION_SERIALIZABLE
     }
+
+  val sqlServerTableLock = parameters.getOrElse(JDBC_SQLSERVER_TABLE_LOCK, "false").toBoolean
+  val sqlServerSqlTimeout = parameters.getOrElse(JDBC_SQLSERVER_TIMEOUT, "60").toInt
   // An option to execute custom SQL before fetching data from the remote DB
   val sessionInitStatement = parameters.get(JDBC_SESSION_INIT_STATEMENT)
 }
@@ -173,4 +176,6 @@ object JDBCOptions {
   val JDBC_BATCH_INSERT_SIZE = newOption("batchsize")
   val JDBC_TXN_ISOLATION_LEVEL = newOption("isolationLevel")
   val JDBC_SESSION_INIT_STATEMENT = newOption("sessionInitStatement")
+  val JDBC_SQLSERVER_TABLE_LOCK = newOption("sqlserverTableLock")
+  val JDBC_SQLSERVER_TIMEOUT = newOption("sqlserverTimeout")
 }

@@ -24,6 +24,8 @@ import scala.collection.JavaConverters._
 import scala.util.Try
 import scala.util.control.NonFatal
 
+import com.microsoft.sqlserver.jdbc.{SQLServerBulkCopy, SQLServerBulkCopyOptions}
+
 import org.apache.spark.TaskContext
 import org.apache.spark.executor.InputMetrics
 import org.apache.spark.internal.Logging
@@ -601,9 +603,34 @@ object JdbcUtils extends Logging {
       batchSize: Int,
       dialect: JdbcDialect,
       isolationLevel: Int,
-      options: JDBCOptions): Iterator[Byte] = {
+      options: JDBCOptions,
+      sqlServerTableLock: Boolean,
+      sqlServerTimeout: Int
+  ): Iterator[Byte] = {
     val conn = getConnection()
     var committed = false
+    val isSqlServer = conn.getMetaData.getDriverName.endsWith("SQL Server")
+    if (isSqlServer) {
+      print("dv01: USING SQLServerBulkCopy")
+      try {
+        val bulkCopy = new SQLServerBulkCopy(conn)
+        bulkCopy.setDestinationTableName(table)
+        val source = new SQLServerBulkRowWrapper(rddSchema, dialect, iterator)
+
+        val copyOptions = new SQLServerBulkCopyOptions()
+        copyOptions.setBatchSize(batchSize)
+        copyOptions.setTableLock(sqlServerTableLock)
+        copyOptions.setBulkCopyTimeout(sqlServerTimeout)  // 600 minutes
+
+        bulkCopy.setBulkCopyOptions(copyOptions)
+
+        bulkCopy.writeToServer(source)
+
+        return Iterator.empty
+      } finally {
+        conn.close()
+      }
+    }
 
     var finalIsolationLevel = Connection.TRANSACTION_NONE
     if (isolationLevel != Connection.TRANSACTION_NONE) {
@@ -828,7 +855,7 @@ object JdbcUtils extends Logging {
     }
     repartitionedDF.rdd.foreachPartition(iterator => savePartition(
       getConnection, table, iterator, rddSchema, insertStmt, batchSize, dialect, isolationLevel,
-      options)
+      options, options.sqlServerTableLock, options.sqlServerSqlTimeout)
     )
   }
 
