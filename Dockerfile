@@ -37,4 +37,5 @@ VOLUME ["/spark"]
 # 8080 -> master ui, 7077 -> spark-submit, 6066 -> spark-submit-rest 8888 -> worker port, 8081 -> worker ui
 EXPOSE 8080 7077 6066 8888 8081
 
-CMD ["/bin/sh", "-c", "SPARK_PUBLIC_DNS=${SPARK_PUBLIC_DNS:-$(hostname)} ./sbin/start-slave.sh spark://$MASTER_HOSTNAME:7077 -d /spark/scratch && tail -f /usr/local/spark/logs/spark--*"]
+CMD ["/bin/sh", "-c", "ls"]
+# CMD ["/bin/sh", "-c", "SPARK_PUBLIC_DNS=${SPARK_PUBLIC_DNS:-$(hostname)} ./sbin/start-slave.sh spark://$MASTER_HOSTNAME:7077 -d /spark/scratch && tail -f /usr/local/spark/logs/spark--*"]
