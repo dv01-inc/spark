@@ -42,7 +42,7 @@ function exit_with_usage {
   echo "make-distribution.sh - tool for making binary distributions of Spark"
   echo ""
   echo "usage:"
-  cl_options="[--name] [--tgz] [--pip] [--r] [--mvn <mvn-command>]"
+  cl_options="[--name] [--tgz] [--pip] [--r] [--e] [--mvn <mvn-command>]"
   echo "make-distribution.sh $cl_options <maven build options>"
   echo "See Spark's \"Building Spark\" doc for correct Maven options."
   echo ""
