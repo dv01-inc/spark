@@ -153,6 +153,7 @@ case class EnsureRequirements(conf: SQLConf) extends Rule[SparkPlan] {
       case (child, distribution) =>
         val numPartitions = distribution.requiredNumPartitions
           .getOrElse(defaultNumPreShufflePartitions)
+        println("!!! Adding Shuffle Partition")
         ShuffleExchangeExec(distribution.createPartitioning(numPartitions), child)
     }
 

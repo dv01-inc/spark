@@ -17,21 +17,26 @@
 
 package org.apache.spark.sql.execution
 
+import java.sql.Date
+import java.time.LocalDate
+
 import org.apache.spark.rdd.RDD
-import org.apache.spark.sql.{execution, DataFrame, Row}
+import org.apache.spark.sql.{DataFrame, Row, execution}
 import org.apache.spark.sql.catalyst.InternalRow
 import org.apache.spark.sql.catalyst.expressions._
 import org.apache.spark.sql.catalyst.plans._
 import org.apache.spark.sql.catalyst.plans.logical.{LocalRelation, LogicalPlan, Range, Repartition, Sort, Union}
 import org.apache.spark.sql.catalyst.plans.physical._
 import org.apache.spark.sql.execution.columnar.{InMemoryRelation, InMemoryTableScanExec}
-import org.apache.spark.sql.execution.exchange.{EnsureRequirements, ReusedExchangeExec, ReuseExchange, ShuffleExchangeExec}
+import org.apache.spark.sql.execution.exchange.{EnsureRequirements, ReuseExchange, ReusedExchangeExec, ShuffleExchangeExec}
 import org.apache.spark.sql.execution.joins.{BroadcastHashJoinExec, SortMergeJoinExec}
+import org.apache.spark.sql.expressions.Window
 import org.apache.spark.sql.functions._
 import org.apache.spark.sql.internal.SQLConf
 import org.apache.spark.sql.test.SharedSQLContext
 import org.apache.spark.sql.types._
 
+//noinspection ScalaStyle
 class PlannerSuite extends SharedSQLContext {
   import testImplicits._
 
@@ -53,6 +58,46 @@ class PlannerSuite extends SharedSQLContext {
       s"The plan of query $query does not have partial aggregations.")
   }
 
+  test("ensureRequirements") {
+    def day(month: Int = 0, day: Int = 0): Date =
+      Date.valueOf(LocalDate.of(2000, 1, 1).plusDays(day).plusMonths(month))
+
+    withTempView("v") {
+      val data = Seq(
+        (1, day(0), 100, "ORIG"),
+        (1, day(1), 90, "CURRENT"),
+        (1, day(2), 0, "PAID"),
+        (2, day(0), 200, "ORIG"),
+        (2, day(1), 200, "DQ")
+      )
+      val window = Window.partitionBy("loan_id").orderBy("as_of_date")
+        .rowsBetween(Window.unboundedPreceding, Window.unboundedFollowing)
+      val df = data
+        .toDF("loan_id", "as_of_date", "cbal", "status")
+
+//      df.createTempView("v")
+
+      val plan = df
+        .select($"*", first('cbal).over(window) as 'obal)
+        .select($"*", 'cbal * 100 as 'cbal)
+        .queryExecution.executedPlan
+
+      println("\n------------")
+      val shuffles = plan.collect { case shuffle: ShuffleExchangeExec => shuffle }
+      println(s"${shuffles.size} Shuffle(s)")
+      for (s <- shuffles) {
+        println(s"""
+           |${s.nodeName}
+           |${s.child.outputPartitioning}
+           |${s.newPartitioning}
+        """.stripMargin)
+      }
+      println("\n------------")
+      println(plan)
+//      val plan = sql("SELECT loan_id, as_of_date, balance * 100 from v").queryExecution.executedPlan
+//      println(plan)
+    }
+  }
   test("count is partially aggregated") {
     val query = testData.groupBy('value).agg(count('key)).queryExecution.analyzed
     testPartialAggregationPlan(query)
